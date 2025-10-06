@@ -11,7 +11,7 @@ let package = Package(
     products: [
         .executable(
             name: "swift-url-finder",
-            targets: ["swift-url-finder"]
+            targets: ["URLFinder"]
         ),
     ],
     dependencies: [
@@ -21,7 +21,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "swift-url-finder",
+            name: "URLFinder",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "IndexStoreDB", package: "indexstore-db"),
@@ -30,8 +30,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "swift-url-finderTests",
-            dependencies: ["swift-url-finder"]
+            name: "URLFinderTests",
+            dependencies: ["URLFinder"]
         ),
     ]
 )
