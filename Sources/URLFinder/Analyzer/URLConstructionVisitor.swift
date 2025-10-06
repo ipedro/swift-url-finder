@@ -8,8 +8,11 @@ class URLConstructionVisitor: SyntaxVisitor {
     
     var baseURL: String?
     var pathComponents: [PathComponent] = []
+    var httpMethod: String?
+    var isURLRequest: Bool = false
     
     private var currentLine: Int = 1
+    private var urlVariableName: String?  // Track URL variable name for method assignment
     
     init(targetSymbol: String, filePath: String) {
         self.targetSymbol = targetSymbol
@@ -19,18 +22,75 @@ class URLConstructionVisitor: SyntaxVisitor {
     
     override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
         // Check if this is our target symbol
-        guard let binding = node.bindings.first,
-              let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
-              pattern.identifier.text == targetSymbol else {
-            return .visitChildren
+        if let binding = node.bindings.first,
+           let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
+           pattern.identifier.text == targetSymbol {
+            
+            // Track the variable name for later method assignment detection
+            urlVariableName = pattern.identifier.text
+            
+            // Extract initialization expression
+            if let initializer = binding.initializer {
+                extractURLConstruction(from: initializer.value)
+            }
+            
+            // Skip children since we already processed the initializer manually
+            return .skipChildren
         }
         
-        // Extract initialization expression
-        if let initializer = binding.initializer {
-            extractURLConstruction(from: initializer.value)
+        // For other variables, continue visiting
+        return .visitChildren
+    }
+    
+    /// Visit function call expressions to detect URLRequest(url:) and httpMethod assignments
+    override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
+        // Check for URLRequest initialization
+        if isURLRequestInit(node) {
+            isURLRequest = true
+            extractURLFromURLRequest(node)
+            return .skipChildren
         }
         
-        return .skipChildren
+        // Check for URLSession methods with URL
+        if isURLSessionMethod(node) {
+            extractURLFromURLSessionMethod(node)
+            return .skipChildren
+        }
+        
+        return .visitChildren
+    }
+    
+    /// Visit member access to detect httpMethod property assignments
+    override func visit(_ node: MemberAccessExprSyntax) -> SyntaxVisitorContinueKind {
+        // Check if this is accessing httpMethod property
+        if node.declName.baseName.text == "httpMethod" {
+            // Look for assignment in parent context
+            // This will be handled in the assignment visitor
+        }
+        return .visitChildren
+    }
+    
+    /// Visit assignment expressions to detect httpMethod = "POST"
+    override func visit(_ node: InfixOperatorExprSyntax) -> SyntaxVisitorContinueKind {
+        // Check if this is an assignment operator
+        if node.operator.as(BinaryOperatorExprSyntax.self)?.operator.text == "=" {
+            // Check left side for httpMethod
+            if let memberAccess = node.leftOperand.as(MemberAccessExprSyntax.self),
+               memberAccess.declName.baseName.text == "httpMethod" {
+                // Verify this is on our target variable
+                if let base = memberAccess.base?.as(DeclReferenceExprSyntax.self),
+                   base.baseName.text == urlVariableName || base.baseName.text == targetSymbol {
+                    // Extract HTTP method from right side
+                    if let stringLiteral = node.rightOperand.as(StringLiteralExprSyntax.self) {
+                        httpMethod = extractStringLiteralValue(stringLiteral)
+                    } else if let memberAccess = node.rightOperand.as(MemberAccessExprSyntax.self) {
+                        // Handle HTTPMethod enum cases like .post, .get
+                        httpMethod = memberAccess.declName.baseName.text.uppercased()
+                    }
+                }
+            }
+        }
+        return .visitChildren
     }
     
     /// Extract URL construction from an expression
@@ -50,6 +110,13 @@ class URLConstructionVisitor: SyntaxVisitor {
     
     /// Extract from a function call expression
     private func extractFromFunctionCall(_ call: FunctionCallExprSyntax) {
+        // Check if this is URLRequest(url:) initialization
+        if isURLRequestInit(call) {
+            isURLRequest = true
+            extractURLFromURLRequest(call)
+            return
+        }
+        
         // Check if this is URL(string:) initialization
         if isURLStringInit(call) {
             extractFromURLStringInit(call)
@@ -253,5 +320,64 @@ class URLConstructionVisitor: SyntaxVisitor {
                 return nil
             }
             .joined()
+    }
+    
+    // MARK: - URLRequest Detection
+    
+    /// Check if function call is URLRequest(url:) initialization
+    private func isURLRequestInit(_ call: FunctionCallExprSyntax) -> Bool {
+        // Check for URLRequest(...) pattern
+        if let identifier = call.calledExpression.as(DeclReferenceExprSyntax.self),
+           identifier.baseName.text == "URLRequest" {
+            return true
+        }
+        return false
+    }
+    
+    /// Extract URL from URLRequest(url:) initialization
+    private func extractURLFromURLRequest(_ call: FunctionCallExprSyntax) {
+        // Look for url: argument
+        for argument in call.arguments {
+            if argument.label?.text == "url" {
+                // Extract the URL expression
+                extractURLConstruction(from: argument.expression)
+                break
+            }
+        }
+    }
+    
+    /// Check if this is a URLSession method call with a URL
+    private func isURLSessionMethod(_ call: FunctionCallExprSyntax) -> Bool {
+        // Check for URLSession.shared.dataTask(with: url)
+        if let memberAccess = call.calledExpression.as(MemberAccessExprSyntax.self) {
+            let methodName = memberAccess.declName.baseName.text
+            return methodName == "dataTask" || 
+                   methodName == "downloadTask" || 
+                   methodName == "uploadTask" ||
+                   methodName == "data" ||
+                   methodName == "download" ||
+                   methodName == "upload"
+        }
+        return false
+    }
+    
+    /// Extract URL from URLSession method call
+    private func extractURLFromURLSessionMethod(_ call: FunctionCallExprSyntax) {
+        // Look for 'with', 'for', or 'from' argument (URL or URLRequest)
+        for argument in call.arguments {
+            if let label = argument.label?.text,
+               (label == "with" || label == "for" || label == "from") {
+                // If it's a URLRequest, we need to trace back to find the URL
+                // For now, just check if it's a direct URL reference
+                if let identifier = argument.expression.as(DeclReferenceExprSyntax.self) {
+                    // This references our target symbol
+                    if identifier.baseName.text == targetSymbol {
+                        // Mark that this URL is being used in a network call
+                        isURLRequest = true
+                    }
+                }
+                break
+            }
+        }
     }
 }

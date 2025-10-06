@@ -16,10 +16,29 @@ struct EndpointReferenceTests {
             symbolName: "testURL",
             baseURL: "baseURL",
             pathComponents: ["api", "v1", "users"],
-            fullPath: "api/v1/users"
+            fullPath: "api/v1/users",
+            httpMethod: nil,
+            isURLRequest: false
         )
         
         #expect(reference.description == "/path/to/file.swift:42:10 - testURL -> api/v1/users")
+    }
+    
+    @Test("EndpointReference with HTTP method shows in description")
+    func testEndpointReferenceWithHTTPMethod() {
+        let reference = EndpointReference(
+            file: "/path/to/file.swift",
+            line: 42,
+            column: 10,
+            symbolName: "createUser",
+            baseURL: "baseURL",
+            pathComponents: ["api", "users"],
+            fullPath: "api/users",
+            httpMethod: "POST",
+            isURLRequest: true
+        )
+        
+        #expect(reference.description == "/path/to/file.swift:42:10 - createUser [POST] -> api/users")
     }
     
     @Test("EndpointReference is Codable")
@@ -31,7 +50,9 @@ struct EndpointReferenceTests {
             symbolName: "url",
             baseURL: "base",
             pathComponents: ["test"],
-            fullPath: "test"
+            fullPath: "test",
+            httpMethod: nil,
+            isURLRequest: false
         )
         
         let encoder = JSONEncoder()
@@ -111,7 +132,9 @@ struct EndpointReportTests {
             symbolName: "url",
             baseURL: "base",
             pathComponents: ["test"],
-            fullPath: "test"
+            fullPath: "test",
+            httpMethod: nil,
+            isURLRequest: false
         )
         
         let endpointInfo = EndpointInfo(
@@ -250,7 +273,9 @@ struct ReportFormatterTests {
             symbolName: "resourcesURL",
             baseURL: "baseURL",
             pathComponents: ["api", "v1", "accounts"],
-            fullPath: "api/v1/accounts"
+            fullPath: "api/v1/accounts",
+            httpMethod: nil,
+            isURLRequest: false
         )
         
         let endpointInfo = EndpointInfo(

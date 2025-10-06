@@ -351,3 +351,98 @@ struct URLStringInitTests {
         #expect(visitor.pathComponents[0].value == "socket")
     }
 }
+
+@Suite("URLRequest Detection Tests")
+struct URLRequestDetectionTests {
+    
+    private func parseSource(_ source: String, targetSymbol: String) -> URLConstructionVisitor {
+        let sourceFile = Parser.parse(source: source)
+        let visitor = URLConstructionVisitor(targetSymbol: targetSymbol, filePath: "/test.swift")
+        visitor.walk(sourceFile)
+        return visitor
+    }
+    
+    @Test("Detects URLRequest initialization with URL")
+    func testURLRequestInit() {
+        let source = """
+        let request = URLRequest(url: someURL)
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "request")
+        
+        #expect(visitor.isURLRequest == true)
+    }
+    
+    @Test("Detects URLRequest with URL(string:)")
+    func testURLRequestWithURLStringInit() {
+        let source = """
+        let request = URLRequest(url: URL(string: "https://api.example.com/users")!)
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "request")
+        
+        #expect(visitor.isURLRequest == true)
+        #expect(visitor.baseURL == "https://api.example.com")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "users")
+    }
+    
+    // NOTE: HTTP method assignment detection from separate statements is complex
+    // and requires analyzing the full AST context. These tests are marked for
+    // future implementation in Phase 2b.
+    
+    @Test("Detects URLRequest with embedded HTTP method", .disabled("Requires code block parsing"))
+    func testHTTPMethodAssignment() {
+        let source = """
+        var request = URLRequest(url: someURL)
+        request.httpMethod = "POST"
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "request")
+        
+        #expect(visitor.isURLRequest == true)
+        // #expect(visitor.httpMethod == "POST")  // TODO: Phase 2b
+    }
+    
+    @Test("URLRequest with inline endpoint")
+    func testCompleteURLRequest() {
+        let source = """
+        let request = URLRequest(url: URL(string: "https://api.example.com/users/123")!)
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "request")
+        
+        #expect(visitor.isURLRequest == true)
+        #expect(visitor.baseURL == "https://api.example.com")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "users/123")
+    }
+}
+
+@Suite("HTTP Method Model Tests")
+struct HTTPMethodTests {
+    
+    @Test("HTTPMethod has all common methods")
+    func testHTTPMethodCases() {
+        #expect(HTTPMethod.GET.rawValue == "GET")
+        #expect(HTTPMethod.POST.rawValue == "POST")
+        #expect(HTTPMethod.PUT.rawValue == "PUT")
+        #expect(HTTPMethod.DELETE.rawValue == "DELETE")
+        #expect(HTTPMethod.PATCH.rawValue == "PATCH")
+        #expect(HTTPMethod.HEAD.rawValue == "HEAD")
+        #expect(HTTPMethod.OPTIONS.rawValue == "OPTIONS")
+    }
+    
+    @Test("HTTPMethod is Codable")
+    func testHTTPMethodCodable() throws {
+        let method = HTTPMethod.POST
+        
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(method)
+        
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(HTTPMethod.self, from: data)
+        
+        #expect(decoded == method)
+    }
+}

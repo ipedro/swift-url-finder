@@ -183,6 +183,8 @@ actor IndexStoreAnalyzer {
         // Update the declaration with discovered information
         if var updatedDeclaration = urlDeclarations[symbolName] {
             updatedDeclaration.pathComponents = visitor.pathComponents
+            updatedDeclaration.httpMethod = visitor.httpMethod
+            updatedDeclaration.isURLRequest = visitor.isURLRequest
             urlDeclarations[symbolName] = updatedDeclaration
             
             // Create an endpoint reference
@@ -193,7 +195,9 @@ actor IndexStoreAnalyzer {
                 symbolName: symbolName,
                 baseURL: visitor.baseURL,
                 pathComponents: visitor.pathComponents.map { $0.value },
-                fullPath: visitor.pathComponents.map { $0.value }.joined(separator: "/")
+                fullPath: visitor.pathComponents.map { $0.value }.joined(separator: "/"),
+                httpMethod: visitor.httpMethod,
+                isURLRequest: visitor.isURLRequest
             )
             
             allReferences.append(reference)
