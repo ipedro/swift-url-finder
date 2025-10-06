@@ -27,6 +27,9 @@ let package = Package(
                 .product(name: "IndexStoreDB", package: "indexstore-db"),
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-parse-as-library"])
             ]
         ),
         .testTarget(
