@@ -20,7 +20,7 @@ struct URLConstructionVisitorTests {
         
         let sourceFile = Parser.parse(source: sourceCode)
         let visitor = URLConstructionVisitor(targetSymbol: "resourcesURL", filePath: "test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         // Verify path component is extracted
         #expect(visitor.pathComponents.count == 1)
@@ -43,7 +43,7 @@ struct URLConstructionVisitorTests {
         
         let sourceFile = Parser.parse(source: sourceCode)
         let visitor = URLConstructionVisitor(targetSymbol: "enableResourceURL", filePath: "test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         // Verify chained path components are extracted in correct order
         #expect(visitor.pathComponents.count == 2)
@@ -66,7 +66,7 @@ struct URLConstructionVisitorTests {
         
         let sourceFile = Parser.parse(source: sourceCode)
         let visitor = URLConstructionVisitor(targetSymbol: "currentResourceStatusURL", filePath: "test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         // Verify all nested path components are extracted in order
         #expect(visitor.pathComponents.count == 3)
@@ -87,7 +87,7 @@ struct URLConstructionVisitorTests {
         
         let sourceFile = Parser.parse(source: sourceCode)
         let visitor = URLConstructionVisitor(targetSymbol: "baseURL", filePath: "test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         #expect(visitor.pathComponents.isEmpty)
     }
@@ -108,7 +108,7 @@ struct URLConstructionVisitorTests {
         
         let sourceFile = Parser.parse(source: sourceCode)
         let visitor = URLConstructionVisitor(targetSymbol: "resourcesURL", filePath: "test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         // Should only extract resourcesURL, not usersURL
         #expect(visitor.pathComponents.count == 1)
@@ -128,7 +128,7 @@ struct URLConstructionVisitorTests {
         
         let sourceFile = Parser.parse(source: sourceCode)
         let visitor = URLConstructionVisitor(targetSymbol: "baseURL", filePath: "test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         #expect(visitor.pathComponents.count == 1)
         #expect(visitor.pathComponents[0].value == "api/services/coordinator")
@@ -147,7 +147,7 @@ struct URLConstructionVisitorTests {
         
         let sourceFile = Parser.parse(source: sourceCode)
         let visitor = URLConstructionVisitor(targetSymbol: "testURL", filePath: "test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         #expect(visitor.pathComponents.count == 1)
         #expect(visitor.pathComponents[0].value == "")
@@ -188,7 +188,7 @@ struct URLStringInitTests {
     private func parseSource(_ source: String, targetSymbol: String) -> URLConstructionVisitor {
         let sourceFile = Parser.parse(source: source)
         let visitor = URLConstructionVisitor(targetSymbol: targetSymbol, filePath: "/test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         return visitor
     }
     
@@ -358,7 +358,7 @@ struct URLRequestDetectionTests {
     private func parseSource(_ source: String, targetSymbol: String) -> URLConstructionVisitor {
         let sourceFile = Parser.parse(source: source)
         let visitor = URLConstructionVisitor(targetSymbol: targetSymbol, filePath: "/test.swift")
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         return visitor
     }
     

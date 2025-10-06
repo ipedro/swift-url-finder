@@ -4,7 +4,8 @@ import SwiftSyntax
 import SwiftParser
 
 actor IndexStoreAnalyzer {
-    let indexStorePath: URL
+    let projectPath: URL
+    let indexStorePath: URL?  // Optional override
     let verbose: Bool
     
     private var indexStore: IndexStore!
@@ -13,7 +14,8 @@ actor IndexStoreAnalyzer {
     private var symbolToURL: [String: String] = [:]  // Maps symbol USR to URL variable name
     private var analyzedFilePaths: Set<String> = []  // Track all files we analyze
     
-    init(indexStorePath: URL, verbose: Bool = false) throws {
+    init(projectPath: URL, indexStorePath: URL? = nil, verbose: Bool = false) throws {
+        self.projectPath = projectPath
         self.indexStorePath = indexStorePath
         self.verbose = verbose
     }
@@ -21,18 +23,32 @@ actor IndexStoreAnalyzer {
     /// Main analysis entry point
     func analyzeProject() async throws {
         if verbose {
-            print("📇 Loading index store from: \(indexStorePath.path)")
+            print("� Analyzing project at: \(projectPath.path)")
         }
         
         // Initialize IndexStore with configuration
-        // The library will automatically resolve libIndexStore path
-        let projectRoot = inferProjectRootFromIndexStore()
+        // The library will automatically resolve libIndexStore path and index store location
+        let configuration: IndexStore.Configuration
         
-        let configuration = try IndexStore.Configuration(
-            projectDirectory: projectRoot?.path ?? FileManager.default.currentDirectoryPath,
-            indexStorePath: indexStorePath.path,
-            indexDatabasePath: NSTemporaryDirectory() + "/endpoint-finder-index.db"
-        )
+        if let customIndexStore = indexStorePath {
+            // User provided custom index store path
+            if verbose {
+                print("📇 Using custom index store: \(customIndexStore.path)")
+            }
+            configuration = try IndexStore.Configuration(
+                projectDirectory: projectPath.path,
+                indexStorePath: customIndexStore.path,
+                indexDatabasePath: NSTemporaryDirectory() + "/endpoint-finder-index.db"
+            )
+        } else {
+            // Let IndexStore auto-discover the index store from project directory
+            if verbose {
+                print("📇 Auto-discovering index store...")
+            }
+            configuration = try IndexStore.Configuration(
+                projectDirectory: projectPath.path
+            )
+        }
         
         indexStore = IndexStore(configuration: configuration)
         
@@ -49,23 +65,6 @@ actor IndexStoreAnalyzer {
         if verbose {
             print("✅ Analysis complete: \(urlDeclarations.count) URL declarations found")
         }
-    }
-    
-    /// Infer project root from index store path
-    private func inferProjectRootFromIndexStore() -> URL? {
-        // Index store is typically at: <project>/.build/<config>/<target>/index/store
-        let components = indexStorePath.pathComponents
-        
-        // Find .build in the path and go up one level
-        if let buildIndex = components.lastIndex(of: ".build") {
-            let projectComponents = Array(components[..<buildIndex])
-            if !projectComponents.isEmpty {
-                let path = projectComponents.joined(separator: "/")
-                return URL(fileURLWithPath: path.hasPrefix("/") ? path : "/\(path)")
-            }
-        }
-        
-        return nil
     }
     
     /// Find all symbols that are URLs or URL-related
@@ -102,6 +101,11 @@ actor IndexStoreAnalyzer {
                     continue
                 }
                 
+                // Skip mock artifacts (generated test doubles)
+                guard !self.isMockArtifact(symbolName) else {
+                    continue
+                }
+                
                 // Skip if we've already processed this symbol
                 guard !foundSymbols.contains(symbol.usr) else {
                     continue
@@ -132,13 +136,33 @@ actor IndexStoreAnalyzer {
         }
     }
     
-    /// Check if a file should be skipped (build artifacts, dependencies, etc.)
+    /// Check if a file should be skipped (build artifacts, dependencies, generated mocks, etc.)
     private func shouldSkipFile(_ path: String) -> Bool {
         return path.contains("/.build/") ||
                path.contains("/DerivedData/") ||
                path.contains("/Pods/") ||
                path.contains("/Carthage/") ||
-               path.contains("/Packages/checkouts/")
+               path.contains("/Packages/checkouts/") ||
+               path.contains(".generated.swift") ||  // Skip generated mock files
+               path.contains("Mock.swift") ||         // Skip manual mocks
+               path.hasSuffix("Mock.generated.swift") // Skip Sourcery mocks
+    }
+    
+    /// Check if a symbol name is likely a mock artifact (not a real URL)
+    private func isMockArtifact(_ symbolName: String) -> Bool {
+        // Common patterns in generated mocks that are not real URLs
+        let mockPatterns = [
+            "CallsCount",
+            "Called",
+            "Closure",
+            "ReturnValue",
+            "ReceivedArguments",
+            "ReceivedInvocations",
+            "ReceivedArgument",
+            "Invocations"
+        ]
+        
+        return mockPatterns.contains(where: { symbolName.contains($0) })
     }
     
 
@@ -171,12 +195,12 @@ actor IndexStoreAnalyzer {
         
         let sourceFile = Parser.parse(source: sourceCode)
         
-        // Use SwiftSyntax to parse the URL construction
+        // Use SwiftSyntax to parse the URL construction with two-pass analysis
         let visitor = URLConstructionVisitor(
             targetSymbol: symbolName,
             filePath: declaration.file
         )
-        visitor.walk(sourceFile)
+        visitor.walkTwoPass(sourceFile)
         
         // Update the declaration with discovered information
         if var updatedDeclaration = urlDeclarations[symbolName] {

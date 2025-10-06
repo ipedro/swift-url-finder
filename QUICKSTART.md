@@ -88,7 +88,17 @@ This creates a comprehensive report of all endpoints in your project.
 
 ### Skip Interactive Prompt
 
-If you already know the index store path:
+If you want to specify the project directly:
+
+```bash
+swift-url-finder find \
+  --project ~/Developer/MyApp \
+  --endpoint "resources/enable"
+```
+
+### Override Index Store Location (Advanced)
+
+If you need to use a custom index store location:
 
 ```bash
 swift-url-finder find \

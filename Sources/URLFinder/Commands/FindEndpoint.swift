@@ -7,7 +7,10 @@ struct FindEndpoint: AsyncParsableCommand {
         abstract: "Find all references to a specific endpoint URL in the project"
     )
     
-    @Option(name: .shortAndLong, help: "Path to the index store (if not provided, will prompt with available options)")
+    @Option(name: .shortAndLong, help: "Path to the Xcode project or workspace directory")
+    var project: String?
+    
+    @Option(name: .shortAndLong, help: "Path to the index store (optional override, auto-discovered if not provided)")
     var indexStore: String?
     
     @Option(name: .shortAndLong, help: "The endpoint path to search for (e.g., 'resources/enable')")
@@ -19,13 +22,13 @@ struct FindEndpoint: AsyncParsableCommand {
     func run() async throws {
         print("🔍 Searching for endpoint: \(endpoint)")
         
-        // Resolve index store path
-        let resolvedIndexStore: String
-        if let providedIndexStore = indexStore {
-            resolvedIndexStore = providedIndexStore
-            print("📇 Index Store: \(resolvedIndexStore)")
+        // Resolve project path
+        let resolvedProject: String
+        if let providedProject = project {
+            resolvedProject = providedProject
+            print("� Project: \(resolvedProject)")
         } else {
-            // Discover and prompt for index store
+            // Interactive: discover and prompt for project
             let discovery = IndexStoreDiscovery()
             let stores = try discovery.discoverIndexStores()
             
@@ -36,15 +39,25 @@ struct FindEndpoint: AsyncParsableCommand {
             }
             
             let selectedStore = try IndexStoreDiscovery.promptForIndexStore(stores: stores)
-            resolvedIndexStore = selectedStore.indexStorePath.path
+            // Infer project path from index store
+            resolvedProject = selectedStore.indexStorePath
+                .deletingLastPathComponent()  // remove "store"
+                .deletingLastPathComponent()  // remove "index"
+                .deletingLastPathComponent()  // remove target
+                .deletingLastPathComponent()  // remove config
+                .deletingLastPathComponent()  // remove ".build"
+                .path
             print("\n✅ Selected: \(selectedStore.projectName)")
+            print("📁 Project: \(resolvedProject)")
         }
         
         print()
         
-        let indexStoreURL = URL(fileURLWithPath: resolvedIndexStore)
+        let projectURL = URL(fileURLWithPath: resolvedProject)
+        let indexStoreURL = indexStore.map { URL(fileURLWithPath: $0) }
         
         let analyzer = try IndexStoreAnalyzer(
+            projectPath: projectURL,
             indexStorePath: indexStoreURL,
             verbose: verbose
         )

@@ -100,10 +100,10 @@ let selected = try IndexStoreDiscovery.promptForIndexStore(stores: stores)
 
 ### 2. IndexStoreAnalyzer (Core Analysis)
 
-**Purpose**: Queries IndexStoreDB and analyzes URL construction patterns.
+**Purpose**: Uses the IndexStore wrapper library to query Xcode's symbol index and analyze URL construction patterns.
 
 **Key Responsibilities**:
-1. Initialize IndexStoreDB from provided path
+1. Initialize IndexStore from project directory (auto-discovers index store location)
 2. Query for URL-related symbols (properties/variables containing "url" or "endpoint")
 3. Get symbol occurrences and definitions
 4. Parse source files with SwiftSyntax to extract URL construction
@@ -111,10 +111,33 @@ let selected = try IndexStoreDiscovery.promptForIndexStore(stores: stores)
 
 **Actor Isolation**: This is an `actor` to ensure thread-safe access to mutable state.
 
+**Initialization**:
+```swift
+// Primary usage - auto-discovers index store from project
+let analyzer = try IndexStoreAnalyzer(
+    projectPath: projectURL,
+    verbose: true
+)
+
+// Advanced - override index store location
+let analyzer = try IndexStoreAnalyzer(
+    projectPath: projectURL,
+    indexStorePath: customIndexURL,
+    verbose: true
+)
+```
+
+**Design Philosophy**:
+- Project directory is the primary input (aligns with IndexStore wrapper's design)
+- Index store location is auto-discovered from `.build/` or DerivedData
+- Optional index store override for advanced use cases
+- IndexStore.Configuration handles path resolution automatically
+
 **Critical Implementation Details**:
-- Must use `IndexStoreDB` correctly (not all APIs are obvious)
-- Symbol querying: `indexStoreDB.symbols(inFilePath:)`
-- Occurrence lookup: `indexStoreDB.occurrences(ofUSR:roles:)`
+- Uses IndexStore wrapper library (CheekyGhost-Labs/IndexStore v3.0)
+- IndexStore.Configuration handles libIndexStore path resolution
+- Auto-discovers index store from project directory
+- Symbol querying through IndexStore wrapper
 - Symbol kinds to look for: `.instanceProperty`, `.classProperty`, `.staticProperty`, `.variable`
 
 **SwiftSyntax Integration**:
@@ -157,24 +180,29 @@ Each command is a `ParsableCommand` or `AsyncParsableCommand`:
 - Useful for users to see what's available
 
 **FindEndpoint**:
-- Takes project path and endpoint to search
-- Optional index store path (prompts if not provided)
+- Primary input: `--project` (path to Xcode project/workspace directory)
+- Required: `--endpoint` (path to search for)
+- Optional: `--index-store` (override auto-discovery)
+- Interactive mode prompts if no project provided
 - Async (analysis can take time)
 - Returns file:line references
 
 **GenerateReport**:
-- Similar to FindEndpoint but generates full report
-- Supports multiple output formats
+- Primary input: `--project` (path to Xcode project/workspace directory)
+- Optional: `--index-store` (override auto-discovery)
+- Supports multiple output formats (text, JSON, markdown)
 - Can write to file or stdout
+- Interactive mode prompts if no project provided
 - Async
 
 **Interactive Mode**:
-All commands check if `--index-store` is provided. If not:
+All commands check if `--project` is provided. If not:
 1. Run `IndexStoreDiscovery().discoverIndexStores()`
 2. Call `IndexStoreDiscovery.promptForIndexStore()`
-3. Use selected store path
+3. Infer project path from selected index store (going up directory tree)
+4. Use inferred project path and optionally the custom index store
 
-This makes the tool user-friendly without requiring manual path hunting.
+This makes the tool user-friendly without requiring manual path hunting, while still aligning with the IndexStore wrapper's project-directory-first design.
 
 ### 5. ReportFormatter (Output)
 

@@ -1,6 +1,13 @@
 import Foundation
 import SwiftSyntax
 
+/// Represents a URL variable declaration found in the file
+private struct URLVariableDeclaration {
+    let name: String
+    let expression: ExprSyntax
+    let node: VariableDeclSyntax
+}
+
 /// Visitor that walks the syntax tree to find URL construction patterns
 class URLConstructionVisitor: SyntaxVisitor {
     let targetSymbol: String
@@ -14,22 +21,61 @@ class URLConstructionVisitor: SyntaxVisitor {
     private var currentLine: Int = 1
     private var urlVariableName: String?  // Track URL variable name for method assignment
     
+    // Two-pass analysis: collect all URL variables first, then resolve dependencies
+    private var urlVariables: [String: URLVariableDeclaration] = [:]
+    private var isCollectingPhase: Bool = true
+    private var visitedVariables: Set<String> = []  // Prevent infinite recursion
+    
     init(targetSymbol: String, filePath: String) {
         self.targetSymbol = targetSymbol
         self.filePath = filePath
         super.init(viewMode: .sourceAccurate)
     }
     
+    /// Perform two-pass analysis: first collect all URL variables, then analyze target
+    func walkTwoPass(_ node: some SyntaxProtocol) {
+        // Phase 1: Collect all URL-related variable declarations
+        isCollectingPhase = true
+        walk(node)
+        
+        // Phase 2: Analyze the target symbol with full context
+        isCollectingPhase = false
+        visitedVariables.removeAll()
+        pathComponents.removeAll()
+        walk(node)
+    }
+    
     override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
-        // Check if this is our target symbol
-        if let binding = node.bindings.first,
-           let pattern = binding.pattern.as(IdentifierPatternSyntax.self),
-           pattern.identifier.text == targetSymbol {
+        guard let binding = node.bindings.first,
+              let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else {
+            return .visitChildren
+        }
+        
+        let varName = pattern.identifier.text
+        
+        // Phase 1: Collect all URL-related variables
+        if isCollectingPhase {
+            // Look for variables that contain "url", "endpoint", or call appendingPathComponent
+            let looksLikeURL = varName.lowercased().contains("url") || 
+                               varName.lowercased().contains("endpoint") ||
+                               (binding.initializer?.value.description.contains("appendingPathComponent") ?? false)
             
+            if looksLikeURL, let initializer = binding.initializer {
+                urlVariables[varName] = URLVariableDeclaration(
+                    name: varName,
+                    expression: initializer.value,
+                    node: node
+                )
+            }
+            return .visitChildren
+        }
+        
+        // Phase 2: Analyze target symbol
+        if varName == targetSymbol {
             // Track the variable name for later method assignment detection
-            urlVariableName = pattern.identifier.text
+            urlVariableName = varName
             
-            // Extract initialization expression
+            // Extract initialization expression with variable resolution
             if let initializer = binding.initializer {
                 extractURLConstruction(from: initializer.value)
             }
@@ -38,7 +84,6 @@ class URLConstructionVisitor: SyntaxVisitor {
             return .skipChildren
         }
         
-        // For other variables, continue visiting
         return .visitChildren
     }
     
@@ -105,6 +150,24 @@ class URLConstructionVisitor: SyntaxVisitor {
         } else if let forceUnwrap = expr.as(ForceUnwrapExprSyntax.self) {
             // Handle force unwrap: URL(string: "...")!.appendingPathComponent(...)
             extractURLConstruction(from: forceUnwrap.expression)
+        } else if let declRef = expr.as(DeclReferenceExprSyntax.self) {
+            // This is a variable reference - try to resolve it
+            resolveVariableReference(declRef.baseName.text)
+        }
+    }
+    
+    /// Resolve a variable reference by looking it up in collected URL variables
+    private func resolveVariableReference(_ varName: String) {
+        // Prevent infinite recursion
+        guard !visitedVariables.contains(varName) else {
+            return
+        }
+        visitedVariables.insert(varName)
+        
+        // Look up the variable in our collected declarations
+        if let declaration = urlVariables[varName] {
+            // Recursively extract its construction
+            extractURLConstruction(from: declaration.expression)
         }
     }
     
