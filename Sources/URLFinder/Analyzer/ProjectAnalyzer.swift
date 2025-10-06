@@ -4,7 +4,6 @@ import SwiftSyntax
 import SwiftParser
 
 actor IndexStoreAnalyzer {
-    let projectPath: URL
     let indexStorePath: URL
     let verbose: Bool
     
@@ -12,9 +11,9 @@ actor IndexStoreAnalyzer {
     private var urlDeclarations: [String: URLDeclaration] = [:]
     private var allReferences: [EndpointReference] = []
     private var symbolToURL: [String: String] = [:]  // Maps symbol USR to URL variable name
+    private var analyzedFilePaths: Set<String> = []  // Track all files we analyze
     
-    init(projectPath: URL, indexStorePath: URL, verbose: Bool = false) throws {
-        self.projectPath = projectPath
+    init(indexStorePath: URL, verbose: Bool = false) throws {
         self.indexStorePath = indexStorePath
         self.verbose = verbose
     }
@@ -22,8 +21,7 @@ actor IndexStoreAnalyzer {
     /// Main analysis entry point
     func analyzeProject() async throws {
         if verbose {
-            print("🔎 Analyzing project at: \(projectPath.path)")
-            print("📇 Loading index store from: \(indexStorePath.path)")
+            print(" Loading index store from: \(indexStorePath.path)")
         }
         
         // Initialize IndexStoreDB
@@ -59,15 +57,18 @@ actor IndexStoreAnalyzer {
             print("🔍 Searching for URL symbols...")
         }
         
-        // Query for property declarations that contain "URL" or "url" in the name
-        // We'll look for properties and variables
-        // Note: We need to iterate through source files in the project
-        let swiftFiles = try findSwiftFiles(in: projectPath)
+        // Get all Swift files from the index store
+        let swiftFiles = getSwiftFilesFromIndex()
         var symbols: [Symbol] = []
         
         for filePath in swiftFiles {
-            let fileSymbols = indexStoreDB.symbols(inFilePath: filePath.path)
+            analyzedFilePaths.insert(filePath)
+            let fileSymbols = indexStoreDB.symbols(inFilePath: filePath)
             symbols.append(contentsOf: fileSymbols)
+        }
+        
+        if verbose {
+            print("  Scanning \(swiftFiles.count) Swift files from index...")
         }
         
         for symbol in symbols {
@@ -94,6 +95,7 @@ actor IndexStoreAnalyzer {
                     
                     urlDeclarations[symbolName] = declaration
                     symbolToURL[symbol.usr] = symbolName
+                    analyzedFilePaths.insert(defnOccurrence.location.path)
                 }
             }
         }
@@ -103,33 +105,87 @@ actor IndexStoreAnalyzer {
         }
     }
     
-    /// Find all Swift files in the project
-    private func findSwiftFiles(in directory: URL) throws -> [URL] {
+    /// Get all Swift files from the index store
+    /// IndexStoreDB doesn't provide a direct file listing, but we can query symbols
+    /// from known locations or use the index store's internal structure
+    private func getSwiftFilesFromIndex() -> [String] {
+        var foundFiles = Set<String>()
+        
+        // Strategy: Query for all symbols by iterating through canonical symbol names
+        // This is a workaround since IndexStoreDB doesn't expose a file listing API
+        // We'll query common symbol types that appear in most Swift files
+        
+        // Use forEachCanonicalSymbolOccurrence with wildcard matching
+        indexStoreDB.forEachCanonicalSymbolOccurrence(byName: "") { occurrence in
+            let path = occurrence.location.path
+            if path.hasSuffix(".swift") && !shouldSkipFile(path) {
+                foundFiles.insert(path)
+            }
+            return true  // Continue iteration
+        }
+        
+        // If no files found via the above, fall back to inferring from index store path
+        if foundFiles.isEmpty {
+            // The index store path structure is: <path>/.build/<config>/<target>/index/store
+            // We can go up to the project root and scan
+            let projectRoot = inferProjectRootFromIndexStore()
+            if let root = projectRoot {
+                foundFiles = Set(scanSwiftFiles(in: root))
+            }
+        }
+        
+        return Array(foundFiles).sorted()
+    }
+    
+    /// Infer project root from index store path
+    private func inferProjectRootFromIndexStore() -> URL? {
+        // Index store is typically at: <project>/.build/<config>/<target>/index/store
+        let components = indexStorePath.pathComponents
+        
+        // Find .build in the path and go up one level
+        if let buildIndex = components.lastIndex(of: ".build") {
+            let projectComponents = Array(components[..<buildIndex])
+            if !projectComponents.isEmpty {
+                let path = projectComponents.joined(separator: "/")
+                return URL(fileURLWithPath: path.hasPrefix("/") ? path : "/\(path)")
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Scan filesystem for Swift files (fallback method)
+    private func scanSwiftFiles(in directory: URL) -> [String] {
         let fileManager = FileManager.default
-        var swiftFiles: [URL] = []
+        var swiftFiles: [String] = []
         
         guard let enumerator = fileManager.enumerator(
             at: directory,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else {
-            throw NSError(domain: "IndexStoreAnalyzer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot enumerate directory"])
+            return []
         }
         
         for case let fileURL as URL in enumerator {
             if fileURL.pathExtension == "swift" {
-                // Skip build artifacts and dependencies
                 let path = fileURL.path
-                if !path.contains("/.build/") &&
-                   !path.contains("/DerivedData/") &&
-                   !path.contains("/Pods/") &&
-                   !path.contains("/Carthage/") {
-                    swiftFiles.append(fileURL)
+                if !shouldSkipFile(path) {
+                    swiftFiles.append(path)
                 }
             }
         }
         
         return swiftFiles
+    }
+    
+    /// Check if a file should be skipped (build artifacts, dependencies, etc.)
+    private func shouldSkipFile(_ path: String) -> Bool {
+        return path.contains("/.build/") ||
+               path.contains("/DerivedData/") ||
+               path.contains("/Pods/") ||
+               path.contains("/Carthage/") ||
+               path.contains("/Packages/checkouts/")
     }
     
     /// Check if a symbol is URL-related
@@ -230,12 +286,52 @@ actor IndexStoreAnalyzer {
             )
         }.sorted { $0.fullPath < $1.fullPath }
         
+        // Infer project root from analyzed files
+        let projectRoot = inferProjectRoot(from: Array(analyzedFilePaths))
+        
         return EndpointReport(
-            projectPath: projectPath.path,
+            projectPath: projectRoot,
             analyzedFiles: urlDeclarations.count,
             totalEndpoints: endpointInfos.count,
             endpoints: endpointInfos,
             timestamp: ISO8601DateFormatter().string(from: Date())
         )
+    }
+    
+    /// Infer the project root directory from a collection of file paths
+    private func inferProjectRoot(from paths: [String]) -> String {
+        guard !paths.isEmpty else {
+            return "Unknown"
+        }
+        
+        // Find the common prefix of all paths
+        let sortedPaths = paths.sorted()
+        guard let first = sortedPaths.first,
+              let last = sortedPaths.last else {
+            return "Unknown"
+        }
+        
+        let firstComponents = first.split(separator: "/")
+        let lastComponents = last.split(separator: "/")
+        
+        var commonComponents: [String] = []
+        for (f, l) in zip(firstComponents, lastComponents) {
+            if f == l {
+                commonComponents.append(String(f))
+            } else {
+                break
+            }
+        }
+        
+        // Go up to find a reasonable project root (look for common indicators)
+        let commonPath = "/" + commonComponents.joined(separator: "/")
+        
+        // Try to find a reasonable stopping point (Sources/, Tests/, etc.)
+        if let sourcesIndex = commonComponents.lastIndex(where: { $0 == "Sources" || $0 == "Tests" || $0 == "src" }) {
+            let projectComponents = Array(commonComponents[..<sourcesIndex])
+            return "/" + projectComponents.joined(separator: "/")
+        }
+        
+        return commonPath
     }
 }

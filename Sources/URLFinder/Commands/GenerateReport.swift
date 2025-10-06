@@ -7,9 +7,6 @@ struct GenerateReport: AsyncParsableCommand {
         abstract: "Generate a comprehensive report of all URL endpoints in the project"
     )
     
-    @Option(name: .shortAndLong, help: "Path to the Xcode project or workspace")
-    var project: String
-    
     @Option(name: .shortAndLong, help: "Path to the index store (if not provided, will prompt with available options)")
     var indexStore: String?
     
@@ -24,7 +21,6 @@ struct GenerateReport: AsyncParsableCommand {
     
     func run() async throws {
         print("📊 Generating endpoint report...")
-        print("📁 Project: \(project)")
         
         // Resolve index store path
         let resolvedIndexStore: String
@@ -49,11 +45,9 @@ struct GenerateReport: AsyncParsableCommand {
         
         print()
         
-        let projectURL = URL(fileURLWithPath: project)
         let indexStoreURL = URL(fileURLWithPath: resolvedIndexStore)
         
         let analyzer = try IndexStoreAnalyzer(
-            projectPath: projectURL,
             indexStorePath: indexStoreURL,
             verbose: verbose
         )

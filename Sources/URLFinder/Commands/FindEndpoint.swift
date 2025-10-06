@@ -7,9 +7,6 @@ struct FindEndpoint: AsyncParsableCommand {
         abstract: "Find all references to a specific endpoint URL in the project"
     )
     
-    @Option(name: .shortAndLong, help: "Path to the Xcode project or workspace")
-    var project: String
-    
     @Option(name: .shortAndLong, help: "Path to the index store (if not provided, will prompt with available options)")
     var indexStore: String?
     
@@ -21,7 +18,6 @@ struct FindEndpoint: AsyncParsableCommand {
     
     func run() async throws {
         print("🔍 Searching for endpoint: \(endpoint)")
-        print("📁 Project: \(project)")
         
         // Resolve index store path
         let resolvedIndexStore: String
@@ -46,11 +42,9 @@ struct FindEndpoint: AsyncParsableCommand {
         
         print()
         
-        let projectURL = URL(fileURLWithPath: project)
         let indexStoreURL = URL(fileURLWithPath: resolvedIndexStore)
         
         let analyzer = try IndexStoreAnalyzer(
-            projectPath: projectURL,
             indexStorePath: indexStoreURL,
             verbose: verbose
         )

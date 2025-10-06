@@ -24,21 +24,9 @@ Before using this tool, you need:
 
 1. **An Xcode project with an up-to-date index**
    - Build your project in Xcode to ensure the index is current
-   - The index is stored in DerivedData
+   - The index is stored in DerivedData at `~/Library/Developer/Xcode/DerivedData/<ProjectName-ID>/Index.noindex/DataStore`
 
-2. **The path to your project's index store**
-   - Located at: `~/Library/Developer/Xcode/DerivedData/<ProjectName-ID>/Index.noindex/DataStore`
-   - Or: `<ProjectDerivedData>/Index.noindex/DataStore`
-
-### Finding Your Index Store Path
-
-```bash
-# List all DerivedData directories
-ls ~/Library/Developer/Xcode/DerivedData/
-
-# Find your project (look for the folder with your project name)
-# Then navigate to: <ProjectFolder>/Index.noindex/DataStore
-```
+**That's it!** The tool automatically discovers project files from the index store—no need to specify a project path.
 
 ## Usage
 
@@ -77,16 +65,13 @@ Search for all references to a specific endpoint path:
 **Interactive mode** (recommended - will prompt you to select an index store):
 
 ```bash
-swift-url-finder find \
-  --project /path/to/YourProject \
-  --endpoint "resources/enable"
+swift-url-finder find --endpoint "resources/enable"
 ```
 
 **Explicit mode** (if you already know the index store path):
 
 ```bash
 swift-url-finder find \
-  --project /path/to/YourProject \
   --index-store ~/Library/Developer/Xcode/DerivedData/YourProject-abc123/Index.noindex/DataStore \
   --endpoint "resources/enable"
 ```
@@ -94,7 +79,6 @@ swift-url-finder find \
 Output:
 ```
 🔍 Searching for endpoint: resources/enable
-📁 Project: /path/to/YourProject
 📇 Index Store: ~/Library/Developer/Xcode/DerivedData/...
 
 ✅ Found 2 reference(s):
@@ -106,8 +90,6 @@ Output:
 With verbose output:
 ```bash
 swift-url-finder find \
-  --project /path/to/YourProject \
-  --index-store ~/Library/Developer/Xcode/DerivedData/YourProject-abc123/Index.noindex/DataStore \
   --endpoint "resources/enable" \
   --verbose
 ```
@@ -119,7 +101,7 @@ Generate a report of all endpoints in the project:
 **Interactive mode** (recommended):
 
 ```bash
-swift-url-finder report --project /path/to/YourProject
+swift-url-finder report
 ```
 
 The tool will show you a list of available index stores to choose from:
@@ -144,7 +126,6 @@ Select an index store (1-2) or 'q' to quit:
 
 ```bash
 swift-url-finder report \
-  --project /path/to/YourProject \
   --index-store ~/Library/Developer/Xcode/DerivedData/YourProject-abc123/Index.noindex/DataStore
 ```
 
@@ -161,8 +142,6 @@ swift-url-finder report \
 **JSON:**
 ```bash
 swift-url-finder report \
-  --project /path/to/YourProject \
-  --index-store ~/Library/Developer/Xcode/DerivedData/YourProject-abc123/Index.noindex/DataStore \
   --format json \
   --output endpoints.json
 ```
@@ -170,8 +149,6 @@ swift-url-finder report \
 **Markdown:**
 ```bash
 swift-url-finder report \
-  --project /path/to/YourProject \
-  --index-store ~/Library/Developer/Xcode/DerivedData/YourProject-abc123/Index.noindex/DataStore \
   --format markdown \
   --output ENDPOINTS.md
 ```
