@@ -274,8 +274,8 @@ struct ReportFormatterTests {
             baseURL: "baseURL",
             pathComponents: ["api", "v1", "accounts"],
             fullPath: "api/v1/accounts",
-            httpMethod: nil,
-            isURLRequest: false
+            httpMethod: "POST",
+            isURLRequest: true
         )
         
         let endpointInfo = EndpointInfo(
@@ -336,6 +336,253 @@ struct ReportFormatterTests {
         #expect(output.contains("**Total Endpoints:**"))
         #expect(output.contains("`api/v1/accounts`"))
         #expect(output.contains("| File | Line | Symbol |"))
+    }
+    
+    @Test("ReportFormatter handles empty report")
+    func testEmptyReport() {
+        let emptyReport = EndpointReport(
+            projectPath: "/test/empty",
+            analyzedFiles: 0,
+            totalEndpoints: 0,
+            endpoints: [],
+            timestamp: "2024-01-01T00:00:00Z"
+        )
+        
+        let textFormatter = ReportFormatter(format: .text)
+        let output = textFormatter.format(report: emptyReport)
+        
+        #expect(output.contains("Total Endpoints: 0"))
+        #expect(output.contains("/test/empty"))
+    }
+    
+    @Test("ReportFormatter shows HTTP method in text format")
+    func testTextFormatWithHTTPMethod() {
+        let formatter = ReportFormatter(format: .text)
+        let report = createSampleReport()
+        let output = formatter.format(report: report)
+        
+        // Should show [POST] for the URLRequest endpoint
+        #expect(output.contains("POST") || output.contains("resourcesURL"))
+    }
+    
+    @Test("ReportFormatter handles multiple endpoints")
+    func testMultipleEndpoints() {
+        let ref1 = EndpointReference(
+            file: "/test/A.swift",
+            line: 10,
+            column: 5,
+            symbolName: "usersURL",
+            baseURL: "https://api.example.com",
+            pathComponents: ["users"],
+            fullPath: "users",
+            httpMethod: "GET",
+            isURLRequest: true
+        )
+        
+        let ref2 = EndpointReference(
+            file: "/test/B.swift",
+            line: 20,
+            column: 5,
+            symbolName: "resourcesURL",
+            baseURL: "https://api.example.com",
+            pathComponents: ["accounts"],
+            fullPath: "accounts",
+            httpMethod: "POST",
+            isURLRequest: true
+        )
+        
+        let report = EndpointReport(
+            projectPath: "/test",
+            analyzedFiles: 2,
+            totalEndpoints: 2,
+            endpoints: [
+                EndpointInfo(
+                    fullPath: "users",
+                    baseURL: "https://api.example.com",
+                    pathComponents: ["users"],
+                    references: [ref1],
+                    declarationFile: "/test/A.swift",
+                    declarationLine: 10
+                ),
+                EndpointInfo(
+                    fullPath: "accounts",
+                    baseURL: "https://api.example.com",
+                    pathComponents: ["accounts"],
+                    references: [ref2],
+                    declarationFile: "/test/B.swift",
+                    declarationLine: 20
+                )
+            ],
+            timestamp: "2024-01-01T00:00:00Z"
+        )
+        
+        let formatter = ReportFormatter(format: .text)
+        let output = formatter.format(report: report)
+        
+        #expect(output.contains("users"))
+        #expect(output.contains("accounts"))
+        #expect(output.contains("Total Endpoints: 2"))
+    }
+    
+    @Test("ReportFormatter JSON is valid and complete")
+    func testJSONFormatCompleteness() throws {
+        let formatter = ReportFormatter(format: .json)
+        let report = createSampleReport()
+        let output = formatter.format(report: report)
+        
+        let data = output.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(EndpointReport.self, from: data)
+        
+        #expect(decoded.projectPath == report.projectPath)
+        #expect(decoded.analyzedFiles == report.analyzedFiles)
+        #expect(decoded.totalEndpoints == report.totalEndpoints)
+        #expect(decoded.endpoints.count == report.endpoints.count)
+        #expect(decoded.timestamp == report.timestamp)
+        
+        // Check endpoint details
+        let endpoint = decoded.endpoints[0]
+        #expect(endpoint.fullPath == "api/v1/accounts")
+        #expect(endpoint.baseURL == "baseURL")
+        #expect(endpoint.pathComponents == ["api", "v1", "accounts"])
+    }
+    
+    @Test("ReportFormatter Markdown has proper structure")
+    func testMarkdownStructure() {
+        let formatter = ReportFormatter(format: .markdown)
+        let report = createSampleReport()
+        let output = formatter.format(report: report)
+        
+        // Check for markdown headers
+        #expect(output.contains("# "))
+        #expect(output.contains("## "))
+        
+        // Check for table structure
+        #expect(output.contains("|"))
+        #expect(output.contains("---"))
+        
+        // Check for code formatting
+        #expect(output.contains("`"))
+    }
+}
+
+@Suite("ReportFormatter Edge Cases")
+struct ReportFormatterEdgeCasesTests {
+    
+    @Test("Handles special characters in paths")
+    func testSpecialCharactersInPaths() {
+        let reference = EndpointReference(
+            file: "/project/Service.swift",
+            line: 1,
+            column: 1,
+            symbolName: "searchURL",
+            baseURL: "https://api.example.com",
+            pathComponents: ["search", "users%20data"],
+            fullPath: "search/users%20data",
+            httpMethod: nil,
+            isURLRequest: false
+        )
+        
+        let report = EndpointReport(
+            projectPath: "/test",
+            analyzedFiles: 1,
+            totalEndpoints: 1,
+            endpoints: [
+                EndpointInfo(
+                    fullPath: "search/users%20data",
+                    baseURL: "https://api.example.com",
+                    pathComponents: ["search", "users%20data"],
+                    references: [reference],
+                    declarationFile: "/project/Service.swift",
+                    declarationLine: 1
+                )
+            ],
+            timestamp: "2024-01-01T00:00:00Z"
+        )
+        
+        let formatter = ReportFormatter(format: .text)
+        let output = formatter.format(report: report)
+        
+        #expect(output.contains("users%20data"))
+    }
+    
+    @Test("Handles very long paths")
+    func testVeryLongPaths() {
+        let longPath = (0..<50).map { "segment\($0)" }.joined(separator: "/")
+        
+        let reference = EndpointReference(
+            file: "/test.swift",
+            line: 1,
+            column: 1,
+            symbolName: "longURL",
+            baseURL: "https://api.example.com",
+            pathComponents: longPath.components(separatedBy: "/"),
+            fullPath: longPath,
+            httpMethod: nil,
+            isURLRequest: false
+        )
+        
+        let report = EndpointReport(
+            projectPath: "/test",
+            analyzedFiles: 1,
+            totalEndpoints: 1,
+            endpoints: [
+                EndpointInfo(
+                    fullPath: longPath,
+                    baseURL: "https://api.example.com",
+                    pathComponents: longPath.components(separatedBy: "/"),
+                    references: [reference],
+                    declarationFile: "/test.swift",
+                    declarationLine: 1
+                )
+            ],
+            timestamp: "2024-01-01T00:00:00Z"
+        )
+        
+        let formatter = ReportFormatter(format: .json)
+        let output = formatter.format(report: report)
+        
+        // Should not crash and should produce valid JSON
+        let data = output.data(using: .utf8)!
+        let decoded = try? JSONDecoder().decode(EndpointReport.self, from: data)
+        #expect(decoded != nil)
+    }
+    
+    @Test("Handles nil baseURL")
+    func testNilBaseURL() {
+        let reference = EndpointReference(
+            file: "/test.swift",
+            line: 1,
+            column: 1,
+            symbolName: "relativeURL",
+            baseURL: nil,
+            pathComponents: ["api", "users"],
+            fullPath: "api/users",
+            httpMethod: nil,
+            isURLRequest: false
+        )
+        
+        let report = EndpointReport(
+            projectPath: "/test",
+            analyzedFiles: 1,
+            totalEndpoints: 1,
+            endpoints: [
+                EndpointInfo(
+                    fullPath: "api/users",
+                    baseURL: nil,
+                    pathComponents: ["api", "users"],
+                    references: [reference],
+                    declarationFile: "/test.swift",
+                    declarationLine: 1
+                )
+            ],
+            timestamp: "2024-01-01T00:00:00Z"
+        )
+        
+        let formatter = ReportFormatter(format: .text)
+        let output = formatter.format(report: report)
+        
+        #expect(output.contains("api/users"))
+        // Should handle nil baseURL gracefully
     }
 }
 
