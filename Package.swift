@@ -4,23 +4,34 @@
 import PackageDescription
 
 let package = Package(
-    name: "endpoint-finder",
+    name: "swift-url-finder",
+    platforms: [
+        .macOS(.v13)
+    ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
-        .library(
-            name: "endpoint-finder",
-            targets: ["endpoint-finder"]
+        .executable(
+            name: "swift-url-finder",
+            targets: ["swift-url-finder"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(url: "https://github.com/swiftlang/indexstore-db", branch: "main"),
+        .package(url: "https://github.com/apple/swift-syntax", from: "510.0.0"),
+    ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
-        .target(
-            name: "endpoint-finder"
+        .executableTarget(
+            name: "swift-url-finder",
+            dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "IndexStoreDB", package: "indexstore-db"),
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax"),
+            ]
         ),
         .testTarget(
-            name: "endpoint-finderTests",
-            dependencies: ["endpoint-finder"]
+            name: "swift-url-finderTests",
+            dependencies: ["swift-url-finder"]
         ),
     ]
 )

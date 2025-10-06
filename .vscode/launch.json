@@ -1,0 +1,40 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:endpoint-finder}",
+            "name": "Debug endpoint-finder",
+            "program": "${workspaceFolder:endpoint-finder}/.build/debug/endpoint-finder",
+            "preLaunchTask": "swift: Build Debug endpoint-finder"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:endpoint-finder}",
+            "name": "Release endpoint-finder",
+            "program": "${workspaceFolder:endpoint-finder}/.build/release/endpoint-finder",
+            "preLaunchTask": "swift: Build Release endpoint-finder"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:endpoint-finder}",
+            "name": "Debug swift-url-finder",
+            "program": "${workspaceFolder:endpoint-finder}/.build/debug/swift-url-finder",
+            "preLaunchTask": "swift: Build Debug swift-url-finder"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:endpoint-finder}",
+            "name": "Release swift-url-finder",
+            "program": "${workspaceFolder:endpoint-finder}/.build/release/swift-url-finder",
+            "preLaunchTask": "swift: Build Release swift-url-finder"
+        }
+    ]
+}
