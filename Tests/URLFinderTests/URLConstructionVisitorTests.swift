@@ -181,3 +181,173 @@ struct PathComponentTests {
         #expect(component.value == "users/v1/profile")
     }
 }
+
+@Suite("URL(string:) Detection Tests")
+struct URLStringInitTests {
+    
+    private func parseSource(_ source: String, targetSymbol: String) -> URLConstructionVisitor {
+        let sourceFile = Parser.parse(source: source)
+        let visitor = URLConstructionVisitor(targetSymbol: targetSymbol, filePath: "/test.swift")
+        visitor.walk(sourceFile)
+        return visitor
+    }
+    
+    @Test("Detects URL(string:) with complete URL")
+    func testURLStringInitWithLiteral() {
+        let source = """
+        let apiURL = URL(string: "https://api.example.com/users")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "apiURL")
+        
+        #expect(visitor.baseURL == "https://api.example.com")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "users")
+    }
+    
+    @Test("Detects URL(string:) with multiple path components")
+    func testURLStringInitWithMultiplePathComponents() {
+        let source = """
+        let profileURL = URL(string: "https://api.example.com/users/profile/settings")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "profileURL")
+        
+        #expect(visitor.baseURL == "https://api.example.com")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "users/profile/settings")
+    }
+    
+    @Test("Detects URL(string:) with port number")
+    func testURLStringInitWithPort() {
+        let source = """
+        let devURL = URL(string: "http://localhost:8080/api/v1/users")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "devURL")
+        
+        #expect(visitor.baseURL == "http://localhost:8080")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "api/v1/users")
+    }
+    
+    @Test("Detects URL(string:) with query parameters")
+    func testURLStringInitWithQueryParameters() {
+        let source = """
+        let searchURL = URL(string: "https://api.example.com/search?q=swift&limit=10")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "searchURL")
+        
+        #expect(visitor.baseURL == "https://api.example.com")
+        #expect(visitor.pathComponents.count == 2)
+        #expect(visitor.pathComponents[0].value == "search")
+        #expect(visitor.pathComponents[1].value == "?q=swift&limit=10")
+    }
+    
+    @Test("Detects URL(string:) with root path only")
+    func testURLStringInitWithRootPath() {
+        let source = """
+        let rootURL = URL(string: "https://api.example.com/")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "rootURL")
+        
+        #expect(visitor.baseURL == "https://api.example.com")
+        #expect(visitor.pathComponents.count == 0)
+    }
+    
+    @Test("Detects URL(string:) with string interpolation")
+    func testURLStringInitWithInterpolation() {
+        let source = """
+        let userURL = URL(string: "\\(baseURL)/users/\\(userId)")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "userURL")
+        
+        #expect(visitor.baseURL == "baseURL")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value.contains("users"))
+        #expect(visitor.pathComponents[0].value.contains("{userId}"))
+    }
+    
+    @Test("Detects URL(string:) with complex interpolation")
+    func testURLStringInitWithComplexInterpolation() {
+        let source = """
+        let endpoint = URL(string: "\\(config.baseURL)/api/v\\(apiVersion)/users/\\(user.id)")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "endpoint")
+        
+        #expect(visitor.baseURL == "config.baseURL")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value.contains("api"))
+        #expect(visitor.pathComponents[0].value.contains("{apiVersion}"))
+        #expect(visitor.pathComponents[0].value.contains("{user.id}"))
+    }
+    
+    @Test("Detects URL(string:) with identifier reference")
+    func testURLStringInitWithIdentifier() {
+        let source = """
+        let endpoint = URL(string: urlString)
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "endpoint")
+        
+        #expect(visitor.baseURL == "urlString")
+        #expect(visitor.pathComponents.count == 0)
+    }
+    
+    @Test("Detects HTTPS URLs")
+    func testURLStringInitWithHTTPS() {
+        let source = """
+        let secureURL = URL(string: "https://secure.example.com/payment/process")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "secureURL")
+        
+        #expect(visitor.baseURL == "https://secure.example.com")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "payment/process")
+    }
+    
+    @Test("Handles relative URL paths")
+    func testURLStringInitWithRelativePath() {
+        let source = """
+        let relativeURL = URL(string: "/api/users")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "relativeURL")
+        
+        // Relative URL without scheme - stored as path component
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "/api/users")
+    }
+    
+    @Test("Handles URL(string:) followed by appendingPathComponent")
+    func testMixedURLStringAndAppendingPath() {
+        let source = """
+        let endpoint = URL(string: "https://api.example.com/users")!.appendingPathComponent("profile")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "endpoint")
+        
+        #expect(visitor.baseURL == "https://api.example.com")
+        #expect(visitor.pathComponents.count == 2)
+        #expect(visitor.pathComponents[0].value == "users")
+        #expect(visitor.pathComponents[1].value == "profile")
+    }
+    
+    @Test("Handles WebSocket URLs")
+    func testURLStringInitWithWebSocket() {
+        let source = """
+        let wsURL = URL(string: "wss://api.example.com/socket")
+        """
+        
+        let visitor = parseSource(source, targetSymbol: "wsURL")
+        
+        #expect(visitor.baseURL == "wss://api.example.com")
+        #expect(visitor.pathComponents.count == 1)
+        #expect(visitor.pathComponents[0].value == "socket")
+    }
+}
