@@ -1,5 +1,5 @@
 import Foundation
-import IndexStoreDB
+import IndexStore
 import SwiftSyntax
 import SwiftParser
 
@@ -7,7 +7,7 @@ actor IndexStoreAnalyzer {
     let indexStorePath: URL
     let verbose: Bool
     
-    private var indexStoreDB: IndexStoreDB!
+    private var indexStore: IndexStore!
     private var urlDeclarations: [String: URLDeclaration] = [:]
     private var allReferences: [EndpointReference] = []
     private var symbolToURL: [String: String] = [:]  // Maps symbol USR to URL variable name
@@ -21,20 +21,20 @@ actor IndexStoreAnalyzer {
     /// Main analysis entry point
     func analyzeProject() async throws {
         if verbose {
-            print(" Loading index store from: \(indexStorePath.path)")
+            print("📇 Loading index store from: \(indexStorePath.path)")
         }
         
-        // Initialize IndexStoreDB
-        let libPath = indexStorePath.appendingPathComponent("../..").standardized
+        // Initialize IndexStore with configuration
+        // The library will automatically resolve libIndexStore path
+        let projectRoot = inferProjectRootFromIndexStore()
         
-        indexStoreDB = try IndexStoreDB(
-            storePath: indexStorePath.path,
-            databasePath: NSTemporaryDirectory() + "/endpoint-finder-index.db",
-            library: IndexStoreLibrary(dylibPath: libPath.path)
+        let configuration = try IndexStore.Configuration(
+            projectDirectory: projectRoot?.path ?? FileManager.default.currentDirectoryPath,
+            indexStorePath: indexStorePath.path,
+            indexDatabasePath: NSTemporaryDirectory() + "/endpoint-finder-index.db"
         )
         
-        // Poll for initialization
-        try await Task.sleep(nanoseconds: 500_000_000) // Wait 0.5s for indexstore to load
+        indexStore = IndexStore(configuration: configuration)
         
         if verbose {
             print("✅ Index store loaded")
@@ -51,8 +51,25 @@ actor IndexStoreAnalyzer {
         }
     }
     
+    /// Infer project root from index store path
+    private func inferProjectRootFromIndexStore() -> URL? {
+        // Index store is typically at: <project>/.build/<config>/<target>/index/store
+        let components = indexStorePath.pathComponents
+        
+        // Find .build in the path and go up one level
+        if let buildIndex = components.lastIndex(of: ".build") {
+            let projectComponents = Array(components[..<buildIndex])
+            if !projectComponents.isEmpty {
+                let path = projectComponents.joined(separator: "/")
+                return URL(fileURLWithPath: path.hasPrefix("/") ? path : "/\(path)")
+            }
+        }
+        
+        return nil
+    }
+    
     /// Find all symbols that are URLs or URL-related
-    /// Directly queries the index for URL-type symbols instead of iterating files
+    /// Uses IndexStore's clean API to query for URL-related symbols
     private func findURLSymbols() async throws {
         if verbose {
             print("🔍 Searching for URL symbols in index...")
@@ -60,53 +77,54 @@ actor IndexStoreAnalyzer {
         
         var foundSymbols = Set<String>()  // Track unique symbol USRs
         
-        // Strategy: Iterate through all canonical symbol occurrences
-        // and filter for URL-related properties/variables
-        // This is more efficient than getting all files first
-        indexStoreDB.forEachCanonicalSymbolOccurrence(byName: "") { occurrence in
-            let symbol = occurrence.symbol
-            let symbolName = symbol.name
+        // Search for symbols containing "url" or "endpoint" in their name
+        // Using IndexStore's clean query API
+        let searchPatterns = ["url", "endpoint"]
+        let propertyKinds: [SourceKind] = [.instanceProperty, .classProperty, .staticProperty, .variable]
+        
+        for pattern in searchPatterns {
+            let query = IndexStoreQuery(query: pattern)
+                .withKinds(propertyKinds)
+                .withAnchorStart(false)
+                .withAnchorEnd(false)
+                .withIncludeSubsequences(true)
+                .withIgnoringCase(true)
+                .withRoles([.definition])
             
-            // Only process Swift files
-            guard occurrence.location.path.hasSuffix(".swift"),
-                  !self.shouldSkipFile(occurrence.location.path) else {
-                return true
+            let symbols = indexStore.querySymbols(query)
+            
+            for symbol in symbols {
+                let symbolName = symbol.name
+                
+                // Only process Swift files
+                guard symbol.location.path.hasSuffix(".swift"),
+                      !self.shouldSkipFile(symbol.location.path) else {
+                    continue
+                }
+                
+                // Skip if we've already processed this symbol
+                guard !foundSymbols.contains(symbol.usr) else {
+                    continue
+                }
+                foundSymbols.insert(symbol.usr)
+                
+                if self.verbose {
+                    print("  Found URL symbol: \(symbolName) in \(symbol.location.path)")
+                }
+                
+                // Create a URL declaration entry
+                let declaration = URLDeclaration(
+                    name: symbolName,
+                    file: symbol.location.path,
+                    line: symbol.location.line,
+                    column: symbol.location.column,
+                    baseURL: nil
+                )
+                
+                self.urlDeclarations[symbolName] = declaration
+                self.symbolToURL[symbol.usr] = symbolName
+                self.analyzedFilePaths.insert(symbol.location.path)
             }
-            
-            // Check if this is a URL-related symbol
-            guard self.isURLSymbol(name: symbolName, kind: symbol.kind) else {
-                return true
-            }
-            
-            // Skip if we've already processed this symbol
-            guard !foundSymbols.contains(symbol.usr) else {
-                return true
-            }
-            foundSymbols.insert(symbol.usr)
-            
-            // Only interested in definitions
-            guard occurrence.roles.contains(.definition) else {
-                return true
-            }
-            
-            if self.verbose {
-                print("  Found URL symbol: \(symbolName) in \(occurrence.location.path)")
-            }
-            
-            // Create a URL declaration entry
-            let declaration = URLDeclaration(
-                name: symbolName,
-                file: occurrence.location.path,
-                line: occurrence.location.line,
-                column: occurrence.location.utf8Column,
-                baseURL: nil
-            )
-            
-            self.urlDeclarations[symbolName] = declaration
-            self.symbolToURL[symbol.usr] = symbolName
-            self.analyzedFilePaths.insert(occurrence.location.path)
-            
-            return true  // Continue iteration
         }
         
         if verbose {
@@ -123,18 +141,7 @@ actor IndexStoreAnalyzer {
                path.contains("/Packages/checkouts/")
     }
     
-    /// Check if a symbol is URL-related
-    private func isURLSymbol(name: String, kind: IndexSymbolKind) -> Bool {
-        // Check for properties and variables (using the actual enum cases from IndexStoreDB)
-        guard kind == .instanceProperty || kind == .classProperty || kind == .staticProperty || kind == .variable else {
-            return false
-        }
-        
-        let lowerName = name.lowercased()
-        return lowerName.contains("url") || 
-               lowerName.contains("endpoint") ||
-               lowerName.hasSuffix("url")
-    }
+
     
     /// Trace how URLs are constructed by following references
     private func traceURLConstructions() async throws {

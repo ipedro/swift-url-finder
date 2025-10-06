@@ -16,7 +16,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
-        .package(url: "https://github.com/swiftlang/indexstore-db", branch: "main"),
+        .package(url: "https://github.com/CheekyGhost-Labs/IndexStore.git", branch: "release/3.0"),
         .package(url: "https://github.com/apple/swift-syntax", from: "510.0.0"),
     ],
     targets: [
@@ -24,7 +24,7 @@ let package = Package(
             name: "URLFinder",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "IndexStoreDB", package: "indexstore-db"),
+                .product(name: "IndexStore", package: "IndexStore"),
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
             ],
