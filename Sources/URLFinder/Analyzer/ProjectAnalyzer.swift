@@ -52,131 +52,66 @@ actor IndexStoreAnalyzer {
     }
     
     /// Find all symbols that are URLs or URL-related
+    /// Directly queries the index for URL-type symbols instead of iterating files
     private func findURLSymbols() async throws {
         if verbose {
-            print("🔍 Searching for URL symbols...")
+            print("🔍 Searching for URL symbols in index...")
         }
         
-        // Get all Swift files from the index store
-        let swiftFiles = getSwiftFilesFromIndex()
-        var symbols: [Symbol] = []
+        var foundSymbols = Set<String>()  // Track unique symbol USRs
         
-        for filePath in swiftFiles {
-            analyzedFilePaths.insert(filePath)
-            let fileSymbols = indexStoreDB.symbols(inFilePath: filePath)
-            symbols.append(contentsOf: fileSymbols)
-        }
-        
-        if verbose {
-            print("  Scanning \(swiftFiles.count) Swift files from index...")
-        }
-        
-        for symbol in symbols {
+        // Strategy: Iterate through all canonical symbol occurrences
+        // and filter for URL-related properties/variables
+        // This is more efficient than getting all files first
+        indexStoreDB.forEachCanonicalSymbolOccurrence(byName: "") { occurrence in
+            let symbol = occurrence.symbol
             let symbolName = symbol.name
             
-            // Check if this looks like a URL property
-            if isURLSymbol(name: symbolName, kind: symbol.kind) {
-                if verbose {
-                    print("  Found URL symbol: \(symbolName)")
-                }
-                
-                // Get the definition location using occurrences
-                let occurrences = indexStoreDB.occurrences(ofUSR: symbol.usr, roles: .definition)
-                
-                if let defnOccurrence = occurrences.first {
-                    // Create a URL declaration entry
-                    let declaration = URLDeclaration(
-                        name: symbolName,
-                        file: defnOccurrence.location.path,
-                        line: defnOccurrence.location.line,
-                        column: defnOccurrence.location.utf8Column,
-                        baseURL: nil
-                    )
-                    
-                    urlDeclarations[symbolName] = declaration
-                    symbolToURL[symbol.usr] = symbolName
-                    analyzedFilePaths.insert(defnOccurrence.location.path)
-                }
+            // Only process Swift files
+            guard occurrence.location.path.hasSuffix(".swift"),
+                  !self.shouldSkipFile(occurrence.location.path) else {
+                return true
             }
+            
+            // Check if this is a URL-related symbol
+            guard self.isURLSymbol(name: symbolName, kind: symbol.kind) else {
+                return true
+            }
+            
+            // Skip if we've already processed this symbol
+            guard !foundSymbols.contains(symbol.usr) else {
+                return true
+            }
+            foundSymbols.insert(symbol.usr)
+            
+            // Only interested in definitions
+            guard occurrence.roles.contains(.definition) else {
+                return true
+            }
+            
+            if self.verbose {
+                print("  Found URL symbol: \(symbolName) in \(occurrence.location.path)")
+            }
+            
+            // Create a URL declaration entry
+            let declaration = URLDeclaration(
+                name: symbolName,
+                file: occurrence.location.path,
+                line: occurrence.location.line,
+                column: occurrence.location.utf8Column,
+                baseURL: nil
+            )
+            
+            self.urlDeclarations[symbolName] = declaration
+            self.symbolToURL[symbol.usr] = symbolName
+            self.analyzedFilePaths.insert(occurrence.location.path)
+            
+            return true  // Continue iteration
         }
         
         if verbose {
             print("  Found \(urlDeclarations.count) URL symbols")
         }
-    }
-    
-    /// Get all Swift files from the index store
-    /// IndexStoreDB doesn't provide a direct file listing, but we can query symbols
-    /// from known locations or use the index store's internal structure
-    private func getSwiftFilesFromIndex() -> [String] {
-        var foundFiles = Set<String>()
-        
-        // Strategy: Query for all symbols by iterating through canonical symbol names
-        // This is a workaround since IndexStoreDB doesn't expose a file listing API
-        // We'll query common symbol types that appear in most Swift files
-        
-        // Use forEachCanonicalSymbolOccurrence with wildcard matching
-        indexStoreDB.forEachCanonicalSymbolOccurrence(byName: "") { occurrence in
-            let path = occurrence.location.path
-            if path.hasSuffix(".swift") && !shouldSkipFile(path) {
-                foundFiles.insert(path)
-            }
-            return true  // Continue iteration
-        }
-        
-        // If no files found via the above, fall back to inferring from index store path
-        if foundFiles.isEmpty {
-            // The index store path structure is: <path>/.build/<config>/<target>/index/store
-            // We can go up to the project root and scan
-            let projectRoot = inferProjectRootFromIndexStore()
-            if let root = projectRoot {
-                foundFiles = Set(scanSwiftFiles(in: root))
-            }
-        }
-        
-        return Array(foundFiles).sorted()
-    }
-    
-    /// Infer project root from index store path
-    private func inferProjectRootFromIndexStore() -> URL? {
-        // Index store is typically at: <project>/.build/<config>/<target>/index/store
-        let components = indexStorePath.pathComponents
-        
-        // Find .build in the path and go up one level
-        if let buildIndex = components.lastIndex(of: ".build") {
-            let projectComponents = Array(components[..<buildIndex])
-            if !projectComponents.isEmpty {
-                let path = projectComponents.joined(separator: "/")
-                return URL(fileURLWithPath: path.hasPrefix("/") ? path : "/\(path)")
-            }
-        }
-        
-        return nil
-    }
-    
-    /// Scan filesystem for Swift files (fallback method)
-    private func scanSwiftFiles(in directory: URL) -> [String] {
-        let fileManager = FileManager.default
-        var swiftFiles: [String] = []
-        
-        guard let enumerator = fileManager.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            return []
-        }
-        
-        for case let fileURL as URL in enumerator {
-            if fileURL.pathExtension == "swift" {
-                let path = fileURL.path
-                if !shouldSkipFile(path) {
-                    swiftFiles.append(path)
-                }
-            }
-        }
-        
-        return swiftFiles
     }
     
     /// Check if a file should be skipped (build artifacts, dependencies, etc.)
