@@ -25,10 +25,13 @@ struct GenerateReport: AsyncParsableCommand {
     func run() async throws {
         print("📊 Generating endpoint report...")
         
-        // Resolve project path
+        // Resolve project path and index store
         let resolvedProject: String
+        let resolvedIndexStore: URL?
+        
         if let providedProject = project {
             resolvedProject = providedProject
+            resolvedIndexStore = indexStore.map { URL(fileURLWithPath: $0) }
             print("� Project: \(resolvedProject)")
         } else {
             // Interactive: discover and prompt for project
@@ -42,22 +45,27 @@ struct GenerateReport: AsyncParsableCommand {
             }
             
             let selectedStore = try IndexStoreDiscovery.promptForIndexStore(stores: stores)
-            // Infer project path from index store
-            resolvedProject = selectedStore.indexStorePath
-                .deletingLastPathComponent()  // remove "store"
-                .deletingLastPathComponent()  // remove "index"
-                .deletingLastPathComponent()  // remove target
-                .deletingLastPathComponent()  // remove config
-                .deletingLastPathComponent()  // remove ".build"
-                .path
             print("\n✅ Selected: \(selectedStore.projectName)")
+            
+            // Prompt for project path
+            print("\n📁 Enter the path to the \(selectedStore.projectName) project:")
+            print("   > ", terminator: "")
+            
+            guard let projectPath = readLine()?.trimmingCharacters(in: .whitespaces), !projectPath.isEmpty else {
+                print("\n❌ Project path is required")
+                throw ExitCode.failure
+            }
+            
+            let expandedPath = NSString(string: projectPath).expandingTildeInPath
+            resolvedProject = expandedPath
+            resolvedIndexStore = selectedStore.indexStorePath
             print("📁 Project: \(resolvedProject)")
         }
         
         print()
         
         let projectURL = URL(fileURLWithPath: resolvedProject)
-        let indexStoreURL = indexStore.map { URL(fileURLWithPath: $0) }
+        let indexStoreURL = resolvedIndexStore
         
         let analyzer = try IndexStoreAnalyzer(
             projectPath: projectURL,
