@@ -304,7 +304,7 @@ Creates a complete API endpoint reference.
 **Scenario**: Review all API endpoints
 
 ```bash
-$ swift-url-finder find --project ~/MyApp --endpoint "banking" --verbose
+$ swift-url-finder find --project ~/MyApp --endpoint "api" --verbose
 ```
 
 Shows all API endpoints with full context.
