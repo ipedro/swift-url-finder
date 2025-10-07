@@ -202,9 +202,37 @@ actor IndexStoreAnalyzer {
         )
         visitor.walkTwoPass(sourceFile)
         
+        // Collect all path components (local + resolved cross-object)
+        var allPathComponents = visitor.pathComponents
+        
+        // If there are unresolved cross-object references, resolve them
+        if !visitor.unresolvedReferences.isEmpty {
+            let resolver = CrossObjectResolver(indexStore: indexStore, verbose: verbose)
+            
+            for unresolved in visitor.unresolvedReferences {
+                if verbose {
+                    print("  Resolving cross-object reference: \(unresolved.objectName).\(unresolved.propertyName)")
+                }
+                
+                do {
+                    let resolved = try resolver.resolveProperty(
+                        objectName: unresolved.objectName,
+                        propertyName: unresolved.propertyName,
+                        fromFile: declaration.file
+                    )
+                    // Prepend resolved components (they come before current components)
+                    allPathComponents = resolved + allPathComponents
+                } catch {
+                    if verbose {
+                        print("  ⚠️  Failed to resolve \(unresolved.objectName).\(unresolved.propertyName): \(error)")
+                    }
+                }
+            }
+        }
+        
         // Update the declaration with discovered information
         if var updatedDeclaration = urlDeclarations[symbolName] {
-            updatedDeclaration.pathComponents = visitor.pathComponents
+            updatedDeclaration.pathComponents = allPathComponents
             updatedDeclaration.httpMethod = visitor.httpMethod
             updatedDeclaration.isURLRequest = visitor.isURLRequest
             urlDeclarations[symbolName] = updatedDeclaration

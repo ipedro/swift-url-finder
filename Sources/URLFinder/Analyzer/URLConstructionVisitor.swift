@@ -8,6 +8,13 @@ private struct URLVariableDeclaration {
     let node: VariableDeclSyntax
 }
 
+/// Represents an unresolved cross-object property reference
+struct UnresolvedReference {
+    let objectName: String      // e.g., "backendService"
+    let propertyName: String    // e.g., "apiV2BaseURL"
+    let location: (file: String, line: Int)
+}
+
 /// Visitor that walks the syntax tree to find URL construction patterns
 class URLConstructionVisitor: SyntaxVisitor {
     let targetSymbol: String
@@ -17,6 +24,9 @@ class URLConstructionVisitor: SyntaxVisitor {
     var pathComponents: [PathComponent] = []
     var httpMethod: String?
     var isURLRequest: Bool = false
+    
+    // Cross-object references that need external resolution
+    var unresolvedReferences: [UnresolvedReference] = []
     
     private var currentLine: Int = 1
     private var urlVariableName: String?  // Track URL variable name for method assignment
@@ -363,13 +373,33 @@ class URLConstructionVisitor: SyntaxVisitor {
     
     /// Extract from a member access expression
     private func extractFromMemberAccess(_ memberAccess: MemberAccessExprSyntax) {
-        // This might be the base URL reference
-        if let base = memberAccess.base {
-            if let identifier = base.as(DeclReferenceExprSyntax.self) {
-                baseURL = identifier.baseName.text
+        // This might be a cross-object property access like: backendService.apiV2BaseURL
+        if let base = memberAccess.base?.as(DeclReferenceExprSyntax.self) {
+            let objectName = base.baseName.text
+            let propertyName = memberAccess.declName.baseName.text
+            
+            // Check if this is a cross-object reference (not in our local variables)
+            if !urlVariables.keys.contains(objectName) && !visitedVariables.contains(objectName) {
+                // This is a cross-object reference - record it for external resolution
+                let converter = SourceLocationConverter(fileName: filePath, tree: memberAccess.root)
+                let position = memberAccess.positionAfterSkippingLeadingTrivia
+                let location = converter.location(for: position)
+                
+                unresolvedReferences.append(UnresolvedReference(
+                    objectName: objectName,
+                    propertyName: propertyName,
+                    location: (file: filePath, line: location.line)
+                ))
+                
+                // Store a placeholder baseURL indicating cross-object reference
+                baseURL = "\(objectName).\(propertyName)"
             } else {
-                extractURLConstruction(from: base)
+                // Local reference, treat as before
+                baseURL = objectName
             }
+        } else if let base = memberAccess.base {
+            // Complex base expression, continue recursion
+            extractURLConstruction(from: base)
         }
     }
     
